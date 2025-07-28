@@ -16,9 +16,15 @@ class _ChatScreenState extends State<ChatScreen> {
   late final StreamSubscription<String> _msgSub;
   late final StreamSubscription<double> _rangeSub;
   late final StreamSubscription<bool> _connectionSub;
+  late final StreamSubscription<Map<String, String>> _vehicleInfoSub;
+  late final StreamSubscription<bool> _manualConnectionSub;
   
   double _currentRange = 0.0;
   bool _isInRange = false;
+  bool _isManuallyConnected = false;
+  String _myVehicle = 'Initializing...';
+  String _connectedVehicle = 'None';
+  String _connectionStatus = 'Disconnected';
 
   @override
   void initState() {
@@ -38,6 +44,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _rangeSub = _bluetoothService.range.listen((range) {
       setState(() {
         _currentRange = range;
+        _isInRange = _currentRange <= 100; // Only in range if <= 100m
       });
     });
     
@@ -45,6 +52,22 @@ class _ChatScreenState extends State<ChatScreen> {
     _connectionSub = _bluetoothService.connectionStatus.listen((connected) {
       setState(() {
         _isInRange = connected;
+      });
+    });
+    
+    // Listen to vehicle information
+    _vehicleInfoSub = _bluetoothService.vehicleInfo.listen((info) {
+      setState(() {
+        _myVehicle = info['myVehicle'] ?? 'Unknown';
+        _connectedVehicle = info['connectedVehicle'] ?? 'None';
+        _connectionStatus = info['status'] ?? 'Disconnected';
+      });
+    });
+
+    // Listen to manual connection status
+    _manualConnectionSub = _bluetoothService.manualConnectionStatus.listen((connected) {
+      setState(() {
+        _isManuallyConnected = connected;
       });
     });
   }
@@ -79,6 +102,8 @@ class _ChatScreenState extends State<ChatScreen> {
     _msgSub.cancel();
     _rangeSub.cancel();
     _connectionSub.cancel();
+    _vehicleInfoSub.cancel();
+    _manualConnectionSub.cancel();
     _bluetoothService.dispose();
     super.dispose();
   }
@@ -87,13 +112,13 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('V2V Safety Communication'),
+        title: Text('$_myVehicle - V2V Safety'),
         backgroundColor: Colors.indigo,
         foregroundColor: Colors.white,
       ),
       body: Column(
         children: [
-          // Range and connection status banner
+          // Vehicle connection status banner
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(12.0),
@@ -101,43 +126,123 @@ class _ChatScreenState extends State<ChatScreen> {
               color: _isInRange ? Colors.green.shade100 : Colors.red.shade100,
               border: Border(bottom: BorderSide(color: Colors.grey.shade300)),
             ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            child: Column(
               children: [
                 Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Icon(
-                      _isInRange ? Icons.wifi : Icons.wifi_off,
-                      color: _isInRange ? Colors.green : Colors.red,
+                    Row(
+                      children: [
+                        Icon(
+                          _isInRange ? Icons.link : Icons.link_off,
+                          color: _isInRange ? Colors.green : Colors.red,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          _isInRange ? '🚗 CONNECTED' : '🚗 DISCONNECTED',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: _isInRange ? Colors.green : Colors.red,
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 8),
-                    Text(
-                      _isInRange ? '🚗 CONNECTED' : '🚗 OUT OF RANGE',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: _isInRange ? Colors.green : Colors.red,
+                    if (_currentRange > 0)
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text(
+                            'Range: ${_currentRange.toInt()}m',
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          Text(
+                            'Signal: ${_getSignalStrength()}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: _getSignalColor(),
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Column(
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.blue.shade600,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            _myVehicle,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Icon(
+                          _isManuallyConnected ? Icons.link : Icons.link_off,
+                          color: _isManuallyConnected ? Colors.green : Colors.grey,
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: _isManuallyConnected ? Colors.green.shade600 : Colors.grey.shade400,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            _isManuallyConnected ? _connectedVehicle : 'Not Connected',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    // Connect/Disconnect Button
+                    SizedBox(
+                      width: 200,
+                      height: 36,
+                      child: ElevatedButton.icon(
+                        onPressed: _isManuallyConnected 
+                          ? () => _bluetoothService.disconnectFromVehicle()
+                          : _bluetoothService.canConnect 
+                            ? () => _bluetoothService.connectToVehicle()
+                            : null,
+                        icon: Icon(
+                          _isManuallyConnected ? Icons.link_off : Icons.link,
+                          size: 18,
+                        ),
+                        label: Text(
+                          _isManuallyConnected ? 'Disconnect' : 'Connect',
+                          style: const TextStyle(fontSize: 14),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: _isManuallyConnected 
+                            ? Colors.red.shade600 
+                            : Colors.green.shade600,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                        ),
                       ),
                     ),
                   ],
                 ),
-                if (_currentRange > 0)
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text(
-                        'Range: ${_currentRange.toInt()}m',
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      Text(
-                        'Signal: ${_getSignalStrength()}',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: _getSignalColor(),
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
               ],
             ),
           ),
@@ -164,11 +269,11 @@ class _ChatScreenState extends State<ChatScreen> {
                   children: [
                     Expanded(
                       child: ElevatedButton.icon(
-                        onPressed: _isInRange ? () => _sendSafetyAlert('pothole') : null,
+                        onPressed: _isManuallyConnected && _isInRange ? () => _sendSafetyAlert('pothole') : null,
                         icon: const Text('🕳️', style: TextStyle(fontSize: 16)),
                         label: const Text('Pothole\nAhead', textAlign: TextAlign.center),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.orange,
+                          backgroundColor: (_isManuallyConnected && _isInRange) ? Colors.orange : Colors.grey,
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 12),
                           shape: RoundedRectangleBorder(
@@ -180,11 +285,11 @@ class _ChatScreenState extends State<ChatScreen> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: ElevatedButton.icon(
-                        onPressed: _isInRange ? () => _sendSafetyAlert('speedbreaker') : null,
+                        onPressed: _isManuallyConnected && _isInRange ? () => _sendSafetyAlert('speedbreaker') : null,
                         icon: const Text('🚧', style: TextStyle(fontSize: 16)),
                         label: const Text('Speed Breaker\nAhead', textAlign: TextAlign.center),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.amber,
+                          backgroundColor: (_isManuallyConnected && _isInRange) ? Colors.amber : Colors.grey,
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 12),
                           shape: RoundedRectangleBorder(
@@ -196,11 +301,11 @@ class _ChatScreenState extends State<ChatScreen> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: ElevatedButton.icon(
-                        onPressed: _isInRange ? () => _sendSafetyAlert('accident') : null,
+                        onPressed: _isManuallyConnected && _isInRange ? () => _sendSafetyAlert('accident') : null,
                         icon: const Text('🚨', style: TextStyle(fontSize: 16)),
                         label: const Text('Accident\nReported', textAlign: TextAlign.center),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.red,
+                          backgroundColor: (_isManuallyConnected && _isInRange) ? Colors.red : Colors.grey,
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 12),
                           shape: RoundedRectangleBorder(
@@ -304,4 +409,4 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
     );
   }
-} 
+}

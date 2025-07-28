@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'chat_screen.dart';
-import 'range_demo_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({Key? key}) : super(key: key);
@@ -62,33 +61,7 @@ class HomeScreen extends StatelessWidget {
               ),
             ),
             
-            const SizedBox(height: 20),
-            
-            // Range Demo Button
-            SizedBox(
-              width: double.infinity,
-              height: 60,
-              child: ElevatedButton.icon(
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (context) => const RangeDemoScreen()),
-                  );
-                },
-                icon: const Icon(Icons.radar, size: 28),
-                label: const Text(
-                  'Range Connectivity Demo',
-                  style: TextStyle(fontSize: 18),
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-              ),
-            ),
+
             
             const SizedBox(height: 40),
             
@@ -109,8 +82,8 @@ class HomeScreen extends StatelessWidget {
                     const SizedBox(height: 8),
                     const Text('• Real-time safety alerts between vehicles'),
                     const Text('• Dynamic range simulation (20-150m)'),
-                    const Text('• Quick-tap safety buttons'),
-                    const Text('• Signal strength monitoring'),
+                    const Text('• One-tap safety warning buttons'),
+                    const Text('• Automatic range and signal monitoring'),
                   ],
                 ),
               ),
