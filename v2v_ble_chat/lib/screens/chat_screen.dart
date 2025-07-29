@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
+import 'dart:io';
+import 'package:image_picker/image_picker.dart';
 import '../services/bluetooth_service.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -12,6 +14,7 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _controller = TextEditingController();
   final List<String> _messages = [];
+  final ImagePicker _imagePicker = ImagePicker();
   late final BluetoothService _bluetoothService;
   late final StreamSubscription<String> _msgSub;
   late final StreamSubscription<double> _rangeSub;
@@ -95,6 +98,97 @@ class _ChatScreenState extends State<ChatScreen> {
     if (_currentRange <= 50) return Colors.green;
     if (_currentRange <= 80) return Colors.orange;
     return Colors.red;
+  }
+
+  // Real image processing methods
+  Future<void> _pickImageFromCamera() async {
+    try {
+      final XFile? image = await _imagePicker.pickImage(
+        source: ImageSource.camera,
+        imageQuality: 80,
+      );
+      
+      if (image != null) {
+        final File imageFile = File(image.path);
+        await _bluetoothService.detectAndAlertHazards(imageFile);
+      }
+    } catch (e) {
+      setState(() {
+        _messages.add('System: ❌ Camera error: $e');
+      });
+    }
+  }
+
+  Future<void> _pickImageFromGallery() async {
+    try {
+      final XFile? image = await _imagePicker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 80,
+      );
+      
+      if (image != null) {
+        final File imageFile = File(image.path);
+        await _bluetoothService.detectAndAlertHazards(imageFile);
+      }
+    } catch (e) {
+      setState(() {
+        _messages.add('System: ❌ Gallery error: $e');
+      });
+    }
+  }
+
+  Future<void> _testPotholeDetection() async {
+    await _bluetoothService.testPotholeDetection();
+  }
+
+  Future<void> _testSpeedBreakerDetection() async {
+    await _bluetoothService.testSpeedBreakerDetection();
+  }
+
+  void _showImageSourceDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('🤖 AI Hazard Detection'),
+          content: const Text('Choose image source for road hazard analysis:'),
+          actions: [
+            TextButton.icon(
+              onPressed: () {
+                Navigator.of(context).pop();
+                _pickImageFromCamera();
+              },
+              icon: const Icon(Icons.camera_alt),
+              label: const Text('Camera'),
+            ),
+            TextButton.icon(
+              onPressed: () {
+                Navigator.of(context).pop();
+                _pickImageFromGallery();
+              },
+              icon: const Icon(Icons.photo_library),
+              label: const Text('Gallery'),
+            ),
+            TextButton.icon(
+              onPressed: () {
+                Navigator.of(context).pop();
+                _testPotholeDetection();
+              },
+              icon: const Text('🕳️'),
+              label: const Text('Test Pothole'),
+            ),
+            TextButton.icon(
+              onPressed: () {
+                Navigator.of(context).pop();
+                _testSpeedBreakerDetection();
+              },
+              icon: const Text('🚧'),
+              label: const Text('Test Speed Breaker'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   @override
@@ -315,6 +409,24 @@ class _ChatScreenState extends State<ChatScreen> {
                       ),
                     ),
                   ],
+                ),
+                const SizedBox(height: 8),
+                // AI Detection Button
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: _showImageSourceDialog,
+                    icon: const Icon(Icons.camera_enhance),
+                    label: const Text('🤖 AI Hazard Detection'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.purple,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
                 ),
               ],
             ),

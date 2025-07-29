@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "com.example.v2v_ble_chat"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 36
     ndkVersion = "27.0.12077973"
 
     compileOptions {

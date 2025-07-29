@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
+import 'dart:io';
 import 'package:web_socket_channel/web_socket_channel.dart';
+import 'image_detection_service.dart';
 
 class BluetoothService {
   static final BluetoothService _instance = BluetoothService._internal();
@@ -18,6 +20,9 @@ class BluetoothService {
   StreamSubscription? _subscription;
   double _currentRange = 50.0; // meters
   Timer? _rangeTimer;
+  
+  // Image detection service
+  final ImageDetectionService _imageDetectionService = ImageDetectionService();
 
   final StreamController<String> _messageController = StreamController.broadcast();
   final StreamController<double> _rangeController = StreamController.broadcast();
@@ -323,34 +328,44 @@ class BluetoothService {
     }
   }
 
-  Future<void> sendSafetyAlert(String alertType) async {
-    String alertMessage = '';
-    String alertIcon = '';
+  Future<void> sendSafetyAlert(String alertType, {String? customMessage}) async {
+    String alertMessage;
+    String alertIcon;
     
-    switch (alertType) {
-      case 'pothole':
-        alertMessage = 'Pothole ahead - Reduce speed';
-        alertIcon = '🕳️';
-        break;
-      case 'speedbreaker':
-        alertMessage = 'Speed breaker ahead - Slow down';
-        alertIcon = '🚧';
-        break;
-      case 'accident':
-        alertMessage = 'Accident reported - Use alternate route';
-        alertIcon = '🚨';
-        break;
+    if (customMessage != null) {
+      alertMessage = customMessage;
+      alertIcon = customMessage.contains('🕳️') ? '🕳️' : 
+                  customMessage.contains('🚧') ? '🚧' : 
+                  customMessage.contains('🚨') ? '🚨' : '⚠️';
+    } else {
+      switch (alertType) {
+        case 'pothole':
+          alertMessage = '🕳️ Pothole ahead - Reduce speed';
+          alertIcon = '🕳️';
+          break;
+        case 'speedbreaker':
+          alertMessage = '🚧 Speed breaker ahead - Slow down';
+          alertIcon = '🚧';
+          break;
+        case 'accident':
+          alertMessage = '🚨 Accident reported - Use alternate route';
+          alertIcon = '🚨';
+          break;
+        default:
+          alertMessage = '⚠️ Road hazard ahead - Proceed with caution';
+          alertIcon = '⚠️';
+      }
     }
     
     // Show locally
-    _messageController.add('Me: $alertIcon $alertMessage');
+    _messageController.add('Me: $alertMessage');
     
     if (_connected && _manuallyConnected && _channel != null && _currentRange <= 100.0) {
       try {
         // Send alert through WebSocket
         final payload = jsonEncode({
           'type': 'alert',
-          'message': '$alertIcon $alertMessage',
+          'message': alertMessage,
           'sender': _vehicleName ?? 'Unknown Vehicle',
           'alertType': alertType,
           'timestamp': DateTime.now().millisecondsSinceEpoch,
@@ -401,6 +416,120 @@ class BluetoothService {
   bool get canConnect => _connected && !_manuallyConnected && _currentRange <= 100.0;
   String get vehicleName => _vehicleName ?? 'Initializing...';
   String get connectedVehicle => _connectedVehicle ?? 'None';
+
+  // Real image-based hazard detection and alert
+  Future<void> detectAndAlertHazards(File imageFile) async {
+    try {
+      _messageController.add('System: 📸 Analyzing uploaded image for hazards...');
+      
+      // Process image with real AI detection
+      final analysis = await _imageDetectionService.processImage(imageFile);
+      
+      if (analysis['hasHazards'] == true) {
+        final alertType = analysis['alertType'];
+        final alertMessage = analysis['alertMessage'];
+        final confidence = analysis['confidence'];
+        
+        _messageController.add('System: 🤖 AI Detection: ${analysis['detectionCount']} hazard(s) found (${(confidence * 100).toInt()}% confidence)');
+        
+        // Send automatic safety alert if connected
+        if (_connected && _manuallyConnected && _currentRange <= 100.0) {
+          await sendSafetyAlert(alertType, customMessage: alertMessage);
+        } else {
+          _messageController.add('System: ⚠️ Hazard detected but not connected - Alert not sent');
+          _messageController.add('Me: $alertMessage');
+        }
+      } else {
+        _messageController.add('System: ✅ AI Analysis: Road clear - No hazards detected');
+      }
+    } catch (e) {
+      _messageController.add('System: ❌ Image analysis failed: $e');
+    }
+  }
+
+  // Test with pothole image
+  Future<void> testPotholeDetection() async {
+    try {
+      _messageController.add('System: 🧪 Testing with pothole image...');
+      
+      final analysis = await _imageDetectionService.testWithPotholeImage();
+      
+      if (analysis['hasHazards'] == true) {
+        final alertType = analysis['alertType'];
+        final alertMessage = analysis['alertMessage'];
+        final confidence = analysis['confidence'];
+        
+        _messageController.add('System: 🤖 AI Detection: ${analysis['detectionCount']} hazard(s) found (${(confidence * 100).toInt()}% confidence)');
+        
+        // Send automatic safety alert if connected
+        if (_connected && _manuallyConnected && _currentRange <= 100.0) {
+          await sendSafetyAlert(alertType, customMessage: alertMessage);
+        } else {
+          _messageController.add('System: ⚠️ Hazard detected but not connected - Alert not sent');
+          _messageController.add('Me: $alertMessage');
+        }
+      } else {
+        _messageController.add('System: ✅ AI Analysis: Road clear - No hazards detected');
+      }
+    } catch (e) {
+      _messageController.add('System: ❌ Pothole test failed: $e');
+    }
+  }
+
+  // Test with speed breaker image
+  Future<void> testSpeedBreakerDetection() async {
+    try {
+      _messageController.add('System: 🧪 Testing with speed breaker image...');
+      
+      final analysis = await _imageDetectionService.testWithSpeedBreakerImage();
+      
+      if (analysis['hasHazards'] == true) {
+        final alertType = analysis['alertType'];
+        final alertMessage = analysis['alertMessage'];
+        final confidence = analysis['confidence'];
+        
+        _messageController.add('System: 🤖 AI Detection: ${analysis['detectionCount']} hazard(s) found (${(confidence * 100).toInt()}% confidence)');
+        
+        // Send automatic safety alert if connected
+        if (_connected && _manuallyConnected && _currentRange <= 100.0) {
+          await sendSafetyAlert(alertType, customMessage: alertMessage);
+        } else {
+          _messageController.add('System: ⚠️ Hazard detected but not connected - Alert not sent');
+          _messageController.add('Me: $alertMessage');
+        }
+      } else {
+        _messageController.add('System: ✅ AI Analysis: Road clear - No hazards detected');
+      }
+    } catch (e) {
+      _messageController.add('System: ❌ Speed breaker test failed: $e');
+    }
+  }
+
+  // Test AI detection with sample image
+  Future<void> testAIDetection() async {
+    try {
+      _messageController.add('System: 🧪 Running AI detection test...');
+      
+      final analysis = await _imageDetectionService.testWithSampleImage();
+      
+      if (analysis['hasHazards'] == true) {
+        final alertMessage = analysis['alertMessage'];
+        final confidence = analysis['confidence'];
+        
+        _messageController.add('System: 🎯 Test Result: Hazard detected (${(confidence * 100).toInt()}% confidence)');
+        _messageController.add('Me: $alertMessage');
+        
+        // Send test alert if connected
+        if (_connected && _manuallyConnected && _currentRange <= 100.0) {
+          await sendSafetyAlert('pothole', customMessage: alertMessage);
+        }
+      } else {
+        _messageController.add('System: 🎯 Test Result: ${analysis['alertMessage']}');
+      }
+    } catch (e) {
+      _messageController.add('System: ❌ AI test failed: $e');
+    }
+  }
 
   void dispose() {
     _rangeTimer?.cancel();
