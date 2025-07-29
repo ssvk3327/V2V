@@ -3,6 +3,9 @@ import 'dart:async';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import '../services/bluetooth_service.dart';
+import '../services/image_detection_service.dart';
+import '../services/backend_api_service.dart';
+import 'detection_result_screen.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({Key? key}) : super(key: key);
@@ -15,7 +18,10 @@ class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _controller = TextEditingController();
   final List<String> _messages = [];
   final ImagePicker _imagePicker = ImagePicker();
+  final ImageDetectionService _imageDetectionService = ImageDetectionService();
+  final BackendApiService _backendApiService = BackendApiService();
   late final BluetoothService _bluetoothService;
+  bool _isProcessingImage = false;
   late final StreamSubscription<String> _msgSub;
   late final StreamSubscription<double> _rangeSub;
   late final StreamSubscription<bool> _connectionSub;
@@ -100,8 +106,10 @@ class _ChatScreenState extends State<ChatScreen> {
     return Colors.red;
   }
 
-  // Real image processing methods
+  // Manual image upload with backend processing
   Future<void> _pickImageFromCamera() async {
+    if (_isProcessingImage) return;
+    
     try {
       final XFile? image = await _imagePicker.pickImage(
         source: ImageSource.camera,
@@ -110,7 +118,7 @@ class _ChatScreenState extends State<ChatScreen> {
       
       if (image != null) {
         final File imageFile = File(image.path);
-        await _bluetoothService.detectAndAlertHazards(imageFile);
+        await _processImageWithBackend(imageFile, 'camera');
       }
     } catch (e) {
       setState(() {
@@ -120,6 +128,8 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _pickImageFromGallery() async {
+    if (_isProcessingImage) return;
+    
     try {
       final XFile? image = await _imagePicker.pickImage(
         source: ImageSource.gallery,
@@ -128,7 +138,7 @@ class _ChatScreenState extends State<ChatScreen> {
       
       if (image != null) {
         final File imageFile = File(image.path);
-        await _bluetoothService.detectAndAlertHazards(imageFile);
+        await _processImageWithBackend(imageFile, 'gallery');
       }
     } catch (e) {
       setState(() {
@@ -137,12 +147,255 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  // Process image with backend API and progress tracking
+  Future<void> _processImageWithBackend(File imageFile, String source) async {
+    setState(() {
+      _isProcessingImage = true;
+      _messages.add('System: 📤 Uploading image to backend for processing...');
+    });
+
+    try {
+      // Check if backend is available
+      final bool backendAvailable = await _backendApiService.isBackendAvailable();
+      
+      if (!backendAvailable) {
+        setState(() {
+          _messages.add('System: ⚠️ Backend unavailable - Using direct API processing...');
+        });
+      }
+
+      // Process image with progress tracking
+      Map<String, dynamic> analysis = await _backendApiService.uploadImageWithProgress(
+        imageFile,
+        (progress) {
+          // Update progress in UI
+          final percentage = (progress * 100).toInt();
+          if (percentage % 20 == 0) { // Update every 20%
+            setState(() {
+              _messages.add('System: 📊 Processing... ${percentage}%');
+            });
+          }
+        },
+      );
+
+      setState(() {
+        _isProcessingImage = false;
+      });
+
+      if (analysis['hasHazards'] == true) {
+        final alertMessage = analysis['alertMessage'];
+        final confidence = analysis['confidence'];
+        final detections = analysis['detections'] as List<DetectionResult>;
+        final source = analysis['source'] ?? 'unknown';
+        final nearestDistance = analysis['nearestDistance'];
+
+        setState(() {
+          String distanceInfo = nearestDistance != null ? ' (nearest: ${nearestDistance.toStringAsFixed(1)}m)' : '';
+          _messages.add('System: 🤖 Backend AI: ${analysis['detectionCount']} hazard(s) found${distanceInfo}');
+          _messages.add('System: 📡 Source: $source');
+        });
+
+        // Show visual detection results
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => DetectionResultScreen(
+              imageFile: imageFile,
+              assetPath: null,
+              detections: detections,
+              alertMessage: alertMessage,
+              confidence: confidence,
+            ),
+          ),
+        );
+
+        // Send automatic safety alert if connected
+        if (_bluetoothService.isConnected && _bluetoothService.isManuallyConnected && _bluetoothService.currentRange <= 100.0) {
+          await _bluetoothService.sendSafetyAlert(analysis['alertType'], customMessage: alertMessage);
+          setState(() {
+            _messages.add('System: 📡 V2V Alert sent: $alertMessage');
+          });
+        } else {
+          setState(() {
+            _messages.add('System: ⚠️ Hazard detected but not connected - Alert not sent');
+            _messages.add('Me: $alertMessage');
+          });
+        }
+      } else {
+        setState(() {
+          _messages.add('System: ✅ Backend Analysis: Road clear - No hazards detected');
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _isProcessingImage = false;
+        _messages.add('System: ❌ Backend processing failed: $e');
+        _messages.add('System: 🔄 Trying direct API fallback...');
+      });
+      
+      // Fallback to direct processing
+      await _processImageWithVisualResults(imageFile, null);
+    }
+  }
+
+  // Fallback method for direct API processing
+  Future<void> _processImageWithVisualResults(File? imageFile, String? assetPath) async {
+    try {
+      setState(() {
+        _messages.add('System: 📸 Analyzing image for hazards...');
+      });
+
+      Map<String, dynamic> analysis;
+      if (imageFile != null) {
+        analysis = await _imageDetectionService.processImage(imageFile);
+      } else if (assetPath != null) {
+        if (assetPath.contains('pothole')) {
+          analysis = await _imageDetectionService.testWithPotholeImage();
+        } else {
+          analysis = await _imageDetectionService.testWithSpeedBreakerImage();
+        }
+      } else {
+        return;
+      }
+
+      if (analysis['hasHazards'] == true) {
+        final alertMessage = analysis['alertMessage'];
+        final confidence = analysis['confidence'];
+        final detections = analysis['detections'] as List<DetectionResult>;
+
+        setState(() {
+          _messages.add('System: 🤖 AI Detection: ${analysis['detectionCount']} hazard(s) found (${(confidence * 100).toInt()}% confidence)');
+        });
+
+        // Show visual detection results
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => DetectionResultScreen(
+              imageFile: imageFile,
+              assetPath: assetPath,
+              detections: detections,
+              alertMessage: alertMessage,
+              confidence: confidence,
+            ),
+          ),
+        );
+
+        // Send automatic safety alert if connected
+        if (_bluetoothService.isConnected && _bluetoothService.isManuallyConnected && _bluetoothService.currentRange <= 100.0) {
+          await _bluetoothService.sendSafetyAlert(analysis['alertType'], customMessage: alertMessage);
+        } else {
+          setState(() {
+            _messages.add('System: ⚠️ Hazard detected but not connected - Alert not sent');
+            _messages.add('Me: $alertMessage');
+          });
+        }
+      } else {
+        setState(() {
+          _messages.add('System: ✅ AI Analysis: Road clear - No hazards detected');
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _messages.add('System: ❌ Image analysis failed: $e');
+      });
+    }
+  }
+
   Future<void> _testPotholeDetection() async {
-    await _bluetoothService.testPotholeDetection();
+    if (_isProcessingImage) return;
+    
+    setState(() {
+      _isProcessingImage = true;
+      _messages.add('System: 🧪 Testing pothole detection with backend...');
+    });
+
+    try {
+      final analysis = await _backendApiService.testBackendDetection('pothole');
+      
+      setState(() {
+        _isProcessingImage = false;
+        final nearestDistance = analysis['nearestDistance'];
+        String distanceInfo = nearestDistance != null ? ' (nearest: ${nearestDistance.toStringAsFixed(1)}m)' : '';
+        _messages.add('System: 🤖 Backend Test: ${analysis['detectionCount']} pothole(s) found${distanceInfo}');
+      });
+
+      if (analysis['hasHazards'] == true) {
+        final detections = analysis['detections'] as List<DetectionResult>;
+        
+        // Show visual detection results
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => DetectionResultScreen(
+              imageFile: null,
+              assetPath: 'assets/test_images/pothole_test.jpeg',
+              detections: detections,
+              alertMessage: analysis['alertMessage'],
+              confidence: analysis['confidence'],
+            ),
+          ),
+        );
+
+        // Send V2V alert if connected
+        if (_bluetoothService.isConnected && _bluetoothService.isManuallyConnected) {
+          await _bluetoothService.sendSafetyAlert(analysis['alertType'], customMessage: analysis['alertMessage']);
+        }
+      }
+    } catch (e) {
+      setState(() {
+        _isProcessingImage = false;
+        _messages.add('System: ❌ Backend test failed: $e');
+        _messages.add('System: 🔄 Using fallback test...');
+      });
+      await _processImageWithVisualResults(null, 'assets/test_images/pothole_test.jpeg');
+    }
   }
 
   Future<void> _testSpeedBreakerDetection() async {
-    await _bluetoothService.testSpeedBreakerDetection();
+    if (_isProcessingImage) return;
+    
+    setState(() {
+      _isProcessingImage = true;
+      _messages.add('System: 🧪 Testing speed breaker detection with backend...');
+    });
+
+    try {
+      final analysis = await _backendApiService.testBackendDetection('speedbreaker');
+      
+      setState(() {
+        _isProcessingImage = false;
+        final nearestDistance = analysis['nearestDistance'];
+        String distanceInfo = nearestDistance != null ? ' (nearest: ${nearestDistance.toStringAsFixed(1)}m)' : '';
+        _messages.add('System: 🤖 Backend Test: ${analysis['detectionCount']} speed breaker(s) found${distanceInfo}');
+      });
+
+      if (analysis['hasHazards'] == true) {
+        final detections = analysis['detections'] as List<DetectionResult>;
+        
+        // Show visual detection results
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => DetectionResultScreen(
+              imageFile: null,
+              assetPath: 'assets/test_images/speedbreaker_test.jpeg',
+              detections: detections,
+              alertMessage: analysis['alertMessage'],
+              confidence: analysis['confidence'],
+            ),
+          ),
+        );
+
+        // Send V2V alert if connected
+        if (_bluetoothService.isConnected && _bluetoothService.isManuallyConnected) {
+          await _bluetoothService.sendSafetyAlert(analysis['alertType'], customMessage: analysis['alertMessage']);
+        }
+      }
+    } catch (e) {
+      setState(() {
+        _isProcessingImage = false;
+        _messages.add('System: ❌ Backend test failed: $e');
+        _messages.add('System: 🔄 Using fallback test...');
+      });
+      await _processImageWithVisualResults(null, 'assets/test_images/speedbreaker_test.jpeg');
+    }
   }
 
   void _showImageSourceDialog() {
@@ -150,8 +403,19 @@ class _ChatScreenState extends State<ChatScreen> {
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          title: const Text('🤖 AI Hazard Detection'),
-          content: const Text('Choose image source for road hazard analysis:'),
+          title: const Text('🤖 AI Hazard Detection with Backend'),
+          content: const Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Choose image source for road hazard analysis:'),
+              SizedBox(height: 8),
+              Text(
+                '📡 Images will be processed through backend API with distance calculation',
+                style: TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+            ],
+          ),
           actions: [
             TextButton.icon(
               onPressed: () {
@@ -159,7 +423,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 _pickImageFromCamera();
               },
               icon: const Icon(Icons.camera_alt),
-              label: const Text('Camera'),
+              label: const Text('📷 Camera Upload'),
             ),
             TextButton.icon(
               onPressed: () {
@@ -167,7 +431,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 _pickImageFromGallery();
               },
               icon: const Icon(Icons.photo_library),
-              label: const Text('Gallery'),
+              label: const Text('🖼️ Gallery Upload'),
             ),
             TextButton.icon(
               onPressed: () {
@@ -175,7 +439,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 _testPotholeDetection();
               },
               icon: const Text('🕳️'),
-              label: const Text('Test Pothole'),
+              label: const Text('Test Pothole (Backend)'),
             ),
             TextButton.icon(
               onPressed: () {
@@ -183,7 +447,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 _testSpeedBreakerDetection();
               },
               icon: const Text('🚧'),
-              label: const Text('Test Speed Breaker'),
+              label: const Text('Test Speed Breaker (Backend)'),
             ),
           ],
         );
@@ -415,11 +679,20 @@ class _ChatScreenState extends State<ChatScreen> {
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton.icon(
-                    onPressed: _showImageSourceDialog,
-                    icon: const Icon(Icons.camera_enhance),
-                    label: const Text('🤖 AI Hazard Detection'),
+                    onPressed: _isProcessingImage ? null : _showImageSourceDialog,
+                    icon: _isProcessingImage 
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                          ),
+                        )
+                      : const Icon(Icons.camera_enhance),
+                    label: Text(_isProcessingImage ? '🔄 Processing Image...' : '🤖 AI Hazard Detection'),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.purple,
+                      backgroundColor: _isProcessingImage ? Colors.grey : Colors.purple,
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 12),
                       shape: RoundedRectangleBorder(

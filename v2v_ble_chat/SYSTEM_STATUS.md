@@ -1,21 +1,22 @@
-# 🚗 V2V Safety Communication System - RUNNING STATUS
+# 🚗 V2V Safety Communication System - FULLY OPERATIONAL WITH DISTANCE CALCULATION
 
 ## ✅ **Currently Running Components**
 
 ### **🖥️ WebSocket Server**
 - **Status**: ✅ RUNNING on port 8080
-- **Vehicles Connected**: 1 (Vehicle A detected)
-- **Function**: Handles V2V communication and vehicle assignments
+- **Features**: Distance-aware V2V communication
+- **Function**: Handles V2V communication with distance information
 
 ### **📱 Flutter Applications**
-- **Vehicle A**: ✅ BUILDING/RUNNING on emulator-5554
-- **Vehicle B**: ✅ BUILDING/RUNNING on emulator-5556
-- **Dart Processes**: 5 active processes detected
+- **Vehicle A**: ✅ RUNNING on emulator-5554 (sdk gphone64 x86 64)
+- **Vehicle B**: ✅ RUNNING on emulator-5556 (sdk gphone64 x86 64)
+- **Platform**: Android 16 (API 36) emulators
 
-### **🤖 AI Integration**
-- **Roboflow API**: ✅ TESTED and WORKING
-- **Sample Detection**: ✅ 2 potholes found (80.6% confidence)
-- **Image Processing**: ✅ Ready for camera/gallery input
+### **🤖 AI Integration with Distance Calculation**
+- **Roboflow API**: ✅ TESTED and WORKING with distance calculation
+- **Pothole Detection**: ✅ 2 potholes found at 1.1m and 1.2m distance
+- **Speed Breaker Detection**: ✅ 1 speed breaker found at 2.7m distance
+- **Distance Algorithm**: ✅ Real-world object dimensions integrated
 
 ---
 

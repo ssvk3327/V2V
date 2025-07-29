@@ -4,24 +4,85 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter/services.dart';
 
-// Detection result model
+// Detection result model with distance calculation
 class DetectionResult {
   final String type; // 'pothole' or 'speed_breaker'
   final double confidence;
   final Map<String, dynamic> boundingBox;
+  final double? distance; // Distance in meters
   
   DetectionResult({
     required this.type,
     required this.confidence,
     required this.boundingBox,
+    this.distance,
   });
   
   factory DetectionResult.fromJson(Map<String, dynamic> json) {
+    final boundingBox = {
+      'x': (json['x'] ?? 0.0).toDouble(),
+      'y': (json['y'] ?? 0.0).toDouble(),
+      'width': (json['width'] ?? 0.0).toDouble(),
+      'height': (json['height'] ?? 0.0).toDouble(),
+    };
+
+    // Calculate distance based on object type and size
+    final distance = _calculateDistance(
+      json['class'] ?? 'unknown',
+      boundingBox['width']!,
+      boundingBox['height']!,
+    );
+
     return DetectionResult(
       type: json['class'] ?? 'unknown',
       confidence: (json['confidence'] ?? 0.0).toDouble(),
-      boundingBox: json,
+      boundingBox: boundingBox,
+      distance: distance,
     );
+  }
+
+  // Distance calculation based on object dimensions
+  static double? _calculateDistance(String objectType, double pixelWidth, double pixelHeight) {
+    // Constants for distance calculation
+    const double focalLength = 800.0; // in pixels (adjust based on camera)
+    
+    double? realWidth;
+    double? realHeight;
+    
+    // Real-world dimensions based on object type
+    switch (objectType.toLowerCase()) {
+      case 'potholes':
+      case 'pothole':
+        realWidth = 0.3;  // approx. pothole width in meters
+        realHeight = 0.1; // approx. pothole height in meters
+        break;
+      case 'speed_breaker':
+      case 'speedbreaker':
+      case 'broken road':
+        realWidth = 3.0;  // approx. speed breaker width in meters
+        realHeight = 0.15; // approx. speed breaker height in meters
+        break;
+      default:
+        return null; // Unknown object type
+    }
+    
+    if (realWidth == null || realHeight == null) return null;
+    
+    // Calculate distance using both width and height, then average
+    final distanceFromWidth = (realWidth * focalLength) / pixelWidth;
+    final distanceFromHeight = (realHeight * focalLength) / pixelHeight;
+    
+    return (distanceFromWidth + distanceFromHeight) / 2;
+  }
+
+  // Get formatted distance string
+  String get distanceString {
+    if (distance == null) return 'Unknown distance';
+    if (distance! < 1.0) {
+      return '${(distance! * 100).toInt()} cm';
+    } else {
+      return '${distance!.toStringAsFixed(1)} m';
+    }
   }
 }
 
@@ -128,8 +189,18 @@ class ImageDetectionService {
       };
     }
     
-    // Sort by confidence
-    detections.sort((a, b) => b.confidence.compareTo(a.confidence));
+    // Sort by distance (nearest first), then by confidence
+    detections.sort((a, b) {
+      // If both have distance, sort by distance (nearest first)
+      if (a.distance != null && b.distance != null) {
+        return a.distance!.compareTo(b.distance!);
+      }
+      // If only one has distance, prioritize it
+      if (a.distance != null) return -1;
+      if (b.distance != null) return 1;
+      // If neither has distance, sort by confidence
+      return b.confidence.compareTo(a.confidence);
+    });
     final topDetection = detections.first;
     
     String alertType;
@@ -141,7 +212,9 @@ class ImageDetectionService {
       case 'potholes':
         alertType = 'pothole';
         alertIcon = '🕳️';
-        alertMessage = '$alertIcon Pothole detected ahead - Reduce speed';
+        alertMessage = topDetection.distance != null 
+            ? '$alertIcon Pothole detected ${topDetection.distanceString} ahead - Reduce speed'
+            : '$alertIcon Pothole detected ahead - Reduce speed';
         break;
       case 'speed_breaker':
       case 'speedbreaker':
@@ -149,12 +222,16 @@ class ImageDetectionService {
       case 'speed breaker':
         alertType = 'speedbreaker';
         alertIcon = '🚧';
-        alertMessage = '$alertIcon Speed breaker detected ahead - Slow down';
+        alertMessage = topDetection.distance != null
+            ? '$alertIcon Speed breaker detected ${topDetection.distanceString} ahead - Slow down'
+            : '$alertIcon Speed breaker detected ahead - Slow down';
         break;
       default:
         alertType = 'hazard';
         alertIcon = '⚠️';
-        alertMessage = '$alertIcon Road hazard detected ahead - Proceed with caution';
+        alertMessage = topDetection.distance != null
+            ? '$alertIcon Road hazard detected ${topDetection.distanceString} ahead - Proceed with caution'
+            : '$alertIcon Road hazard detected ahead - Proceed with caution';
     }
     
     return {
@@ -164,9 +241,14 @@ class ImageDetectionService {
       'alertIcon': alertIcon,
       'confidence': topDetection.confidence,
       'detectionCount': detections.length,
+      'detections': detections, // Full detection objects with bounding boxes
+      'nearestDistance': topDetection.distance,
       'allDetections': detections.map((d) => {
         'type': d.type,
         'confidence': d.confidence,
+        'boundingBox': d.boundingBox,
+        'distance': d.distance,
+        'distanceString': d.distanceString,
       }).toList(),
     };
   }
